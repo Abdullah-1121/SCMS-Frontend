@@ -12,6 +12,7 @@ type StreamLog = {
   message: string
   timestamp: string
 }
+
 interface InventoryItem {
   item_id: string
   name: string
@@ -47,22 +48,35 @@ interface SLAViolation {
   reported_on: string
 }
 
-interface Metric {
-  name: string
-  value: number
-  unit: string
-  description: string
-}
-
 export default function SupplyChainDashboard() {
   const [inventory, setInventory] = useState<InventoryItem[]>([])
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([])
-  const [restockPlan, setRestockPlan] = useState<RestockPlan[]>([])
   const [slaViolations, setSlaViolations] = useState<SLAViolation[]>([])
-  const [metrics, setMetrics] = useState<Metric[]>([])
   const [activityLogs, setActivityLogs] = useState<StreamLog[]>([])
   const [isRunning, setIsRunning] = useState(false)
   const scrollAreaRef = useRef<HTMLDivElement | null>(null)
+
+  const fetchDashboardData = async () => {
+    try {
+      const [inventoryRes, purchaseOrdersRes, slaViolationsRes] = await Promise.all([
+        fetch("http://localhost:8000/inventory"),
+        fetch("http://localhost:8000/purchase-orders"),
+        fetch("http://localhost:8000/sla-violations"),
+      ])
+
+      const [inventoryData, purchaseOrderData, slaData] = await Promise.all([
+        inventoryRes.json(),
+        purchaseOrdersRes.json(),
+        slaViolationsRes.json(),
+      ])
+
+      setInventory(inventoryData || [])
+      setPurchaseOrders(purchaseOrderData || [])
+      setSlaViolations(slaData || [])
+    } catch (error) {
+      console.error("Failed to load dashboard data:", error)
+    }
+  }
 
   const runSystem = async () => {
     setIsRunning(true)
@@ -81,19 +95,26 @@ export default function SupplyChainDashboard() {
     }
 
     eventSource.onerror = () => {
+      console.error("Stream error occurred")
       eventSource.close()
       setIsRunning(false)
+      fetchDashboardData()
     }
 
-    const res = await fetch("http://localhost:8000/run")
-    const data = await res.json()
+    eventSource.onopen = () => {
+      console.log("Streaming started")
+    }
 
-    setInventory(data.inventory_data)
-    setPurchaseOrders(data.purchase_orders)
-    setRestockPlan(data.restock_plan)
-    setSlaViolations(data.sla_violations)
-    setMetrics(data.metrics)
+    eventSource.addEventListener("end", () => {
+      eventSource.close()
+      setIsRunning(false)
+      fetchDashboardData()
+    })
   }
+
+  useEffect(() => {
+    fetchDashboardData()
+  }, [])
 
   useEffect(() => {
     if (scrollAreaRef.current) {
@@ -113,73 +134,71 @@ export default function SupplyChainDashboard() {
         return <Badge>{status}</Badge>
     }
   }
-  // Metrics Summary Calculations
+
   const totalPurchaseOrders = purchaseOrders.length
   const slaViolationsCount = slaViolations.length
   const lowStockItems = inventory.filter(item => item.stock_level < item.reorder_threshold)
-  const averageLeadTime = "3.4 days" // You can calculate it later if you want
-
+  const averageLeadTime = "3.4 days"
 
   return (
     <div className="p-4 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-            <h1 className="text-3xl font-bold text-gray-900">AutoLogix - AI Powered Supply Chain Management</h1>
-            <p className="text-gray-600">Real-time monitoring and optimization dashboard</p>
-          </div>
-        
+          <h1 className="text-3xl font-bold text-gray-900">AutoLogix - AI Powered Supply Chain Management</h1>
+          <p className="text-gray-600">Real-time monitoring and optimization dashboard</p>
+        </div>
         <Button onClick={runSystem} disabled={isRunning} className="bg-blue-600">
           <Play className="mr-2 h-4 w-4" />
           {isRunning ? "Running..." : "Run Supply Chain System"}
         </Button>
       </div>
+
       {/* Metrics Summary */}
-<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-  <Card>
-    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-      <CardTitle className="text-sm font-medium">Total Purchase Orders</CardTitle>
-      <ShoppingCart className="h-4 w-4 text-muted-foreground" />
-    </CardHeader>
-    <CardContent>
-      <div className="text-2xl font-bold">{totalPurchaseOrders}</div>
-      <p className="text-xs text-muted-foreground">+2 from last week</p>
-    </CardContent>
-  </Card>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total Purchase Orders</CardTitle>
+            <ShoppingCart className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{totalPurchaseOrders}</div>
+            <p className="text-xs text-muted-foreground">+2 from last week</p>
+          </CardContent>
+        </Card>
 
-  <Card>
-    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-      <CardTitle className="text-sm font-medium">SLA Violations</CardTitle>
-      <AlertTriangle className="h-4 w-4 text-muted-foreground" />
-    </CardHeader>
-    <CardContent>
-      <div className="text-2xl font-bold text-red-600">{slaViolationsCount}</div>
-      <p className="text-xs text-muted-foreground">-1 from last week</p>
-    </CardContent>
-  </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">SLA Violations</CardTitle>
+            <AlertTriangle className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-red-600">{slaViolationsCount}</div>
+            <p className="text-xs text-muted-foreground">-1 from last week</p>
+          </CardContent>
+        </Card>
 
-  <Card>
-    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-      <CardTitle className="text-sm font-medium">Average Lead Time</CardTitle>
-      <Clock className="h-4 w-4 text-muted-foreground" />
-    </CardHeader>
-    <CardContent>
-      <div className="text-2xl font-bold">{averageLeadTime}</div>
-      <p className="text-xs text-muted-foreground">-0.5 days from last week</p>
-    </CardContent>
-  </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Average Lead Time</CardTitle>
+            <Clock className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{averageLeadTime}</div>
+            <p className="text-xs text-muted-foreground">-0.5 days from last week</p>
+          </CardContent>
+        </Card>
 
-  <Card>
-    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-      <CardTitle className="text-sm font-medium">Low Stock Items</CardTitle>
-      <Package className="h-4 w-4 text-muted-foreground" />
-    </CardHeader>
-    <CardContent>
-      <div className="text-2xl font-bold text-orange-600">{lowStockItems.length}</div>
-      <p className="text-xs text-muted-foreground">Requires attention</p>
-    </CardContent>
-  </Card>
-</div>
-
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Low Stock Items</CardTitle>
+            <Package className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-orange-600">{lowStockItems.length}</div>
+            <p className="text-xs text-muted-foreground">Requires attention</p>
+          </CardContent>
+        </Card>
+      </div>
 
       {/* Logs */}
       <Card>
